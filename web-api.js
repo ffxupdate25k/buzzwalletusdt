@@ -36,7 +36,7 @@ export const api = {
   getTasks:          ()        => http("/api/tasks"),
   claimTask:         (id)      => post(`/api/tasks/${id}/claim`),
   submitProof:       (id, img) => post(`/api/tasks/${id}/submit`, { image: img }),
-  saveWallet:        (address) => post("/api/wallet", { address }),
+  saveWallet:        (address, qrImage) => post("/api/wallet", { address, qr_image: qrImage }),
   requestWithdrawal: (payload) => post("/api/withdrawals", payload),
 
   admin: {
@@ -71,6 +71,11 @@ export const api = {
     users:             (q)         => http(`/api/admin/users?q=${encodeURIComponent(q || "")}`),
     adjustBalance:     (id, amount, note) => post(`/api/admin/users/${id}/balance`, { amount, note }),
     resetWallet:       (id)        => post(`/api/admin/users/${id}/wallet/reset`),
+    async walletQrImage(id) {
+      const res = await fetch(CONFIG.API_BASE + `/api/admin/users/${id}/wallet/qr`, { headers: authHeader() });
+      if (!res.ok) throw new Error("Could not load the image.");
+      return res.blob();
+    },
 
     broadcast:         (text)      => post("/api/admin/broadcast", { text }),
     broadcasts:        ()          => http("/api/admin/broadcasts")
