@@ -3,6 +3,16 @@ import { api } from "./web-api.js";
 import { notify, haptic, confirmBox } from "./web-telegram.js";
 import { esc, money, fmtDate, fail, shortAddr } from "./web-utils.js";
 
+async function viewQr(id) {
+  const blob = await api.admin.walletQrImage(id);
+  const url = URL.createObjectURL(blob);
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.innerHTML = `<img src="${url}" alt="Wallet QR code"><span>Tap anywhere to close</span>`;
+  modal.onclick = () => { URL.revokeObjectURL(url); modal.remove(); };
+  document.body.appendChild(modal);
+}
+
 export default {
   async render(el) {
     let lastQuery = "";
@@ -17,8 +27,8 @@ export default {
             <b>${esc(u.name)}</b><b style="color:var(--blue)">${money(u.balance)}</b>
           </div>
           <div class="hint">${u.username ? "@" + esc(u.username) + " · " : ""}ID ${esc(u.id)} · ${u.referrals} referrals</div>
-          <div class="hint">Wallet: ${u.wallet_address ? esc(shortAddr(u.wallet_address)) : "not connected"} · Joined ${esc(fmtDate(u.created_at))}</div>
-          <div class="acts"><button class="btn sm ghost" data-id="${u.id}">Adjust balance</button></div>
+          <div class="hint">Wallet: ${u.wallet_address ? esc(shortAddr(u.wallet_address)) : "not saved"} · Joined ${esc(fmtDate(u.created_at))}</div>
+          <div class="acts"><button class="btn sm ghost" data-id="${u.id}">Open</button></div>
         </div>`).join("") : `<div class="card empty">No users found.</div>`;
 
       box.querySelectorAll("[data-id]").forEach((b) => {
@@ -33,8 +43,13 @@ export default {
           <b>${esc(u.name)}</b>
           <div class="hint">${u.username ? "@" + esc(u.username) + " · " : ""}ID ${esc(u.id)}</div>
           <div class="row"><span class="l">Balance</span><span class="r" id="bal">${money(balance)}</span></div>
-          <div class="row"><span class="l">Wallet</span><span class="r mono" style="font-size:12px">${u.wallet_address ? esc(u.wallet_address) : "Not connected"}</span></div>
-          ${u.wallet_address ? `<div class="acts" style="margin-top:0"><button class="btn sm danger" id="reset">Reset wallet</button></div><p class="hint">Resetting lets this user connect a different wallet.</p>` : ""}
+          <div class="row"><span class="l">Wallet</span><span class="r mono" style="font-size:12px">${u.wallet_address ? esc(u.wallet_address) : "Not saved"}</span></div>
+          ${u.wallet_address ? `
+            <div class="acts" style="margin-top:0">
+              ${u.has_wallet_qr ? `<button class="btn sm ghost" id="qr">View QR screenshot</button>` : ""}
+              <button class="btn sm danger" id="reset">Reset wallet</button>
+            </div>
+            <p class="hint">Resetting lets this user save a different wallet.</p>` : ""}
           <label for="a-amt">Amount (USD)</label>
           <input id="a-amt" type="number" inputmode="decimal" step="any" placeholder="0.00">
           <label for="a-note">Note (optional, shown in their history)</label>
@@ -63,13 +78,17 @@ export default {
         } catch (err) { fail(err); }
         btn.disabled = false;
       }
+      const qr = el.querySelector("#qr");
+      if (qr) qr.onclick = () => viewQr(u.id).catch(fail);
+
       const reset = el.querySelector("#reset");
       if (reset) {
         reset.onclick = async () => {
-          if (!(await confirmBox("Let this user connect a different wallet?"))) return;
+          if (!(await confirmBox("Let this user save a different wallet?"))) return;
           try {
             await api.admin.resetWallet(u.id);
             u.wallet_address = null;
+            u.has_wallet_qr = false;
             haptic("success");
             notify("Wallet reset.");
             showUser(u);
