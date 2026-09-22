@@ -30,7 +30,6 @@ router.get('/me', wrap(async (req, res) => {
     is_admin: req.isAdmin,
     referral_link: `https://t.me/${state.bot.username}?start=ref_${req.user.id}`,
     wallet_address: req.user.wallet_address || null,
-    wc_project_id: s.wc_project_id || '',
     auto_payout: !!(s.auto_payout && s.payout_api_key && s.payout_token_address),
     referral_reward: s.referral_reward,
     min_withdraw: s.min_withdraw,
@@ -146,24 +145,29 @@ router.post('/tasks/:id/submit', wrap(async (req, res) => {
   res.json({ status: 'pending' });
 }));
 
-// Saves the BEP20 address the user approved in Trust Wallet. It can only be set once.
+// Saves the BEP20 address the user typed, plus a screenshot of their wallet's QR code as
+// proof of the address. Can only be set once; an admin can reset it in Users if needed.
 router.post('/wallet', wrap(async (req, res) => {
-  const address = String((req.body || {}).address || '').trim();
+  const address = String((req.body || {}).address || '').trim().toLowerCase();
   if (!/^0x[a-fA-F0-9]{40}$/.test(address) || /^0x0{40}$/.test(address)) {
-    throw new HttpError(400, 'That is not a valid BEP20 wallet address.');
+    throw new HttpError(400, 'That is not a valid USDT BEP20 wallet address.');
   }
+  const img = parseImage((req.body || {}).qr_image);
+  if (!img) throw new HttpError(400, 'Please attach a clear screenshot of your wallet address QR code (PNG or JPG, under 4 MB).');
+
   let r;
   try {
     r = await pool.query(
-      `UPDATE users SET wallet_address = $1, wallet_connected_at = now()
-        WHERE id = $2 AND wallet_address IS NULL RETURNING wallet_address`,
-      [address.toLowerCase(), req.user.id]
+      `UPDATE users SET wallet_address = $1, wallet_connected_at = now(), wallet_qr_image = $2, wallet_qr_mime = $3
+        WHERE id = $4 AND wallet_address IS NULL RETURNING wallet_address`,
+      [address, img.buf, img.mime, req.user.id]
     );
   } catch (e) {
-    if (e.code === '23505') throw new HttpError(409, 'This wallet is already linked to another account.');
+    if (e.code === '23505') throw new HttpError(409, 'This wallet address is already linked to another account.');
     throw e;
   }
-  if (!r.rowCount) throw new HttpError(409, 'Your wallet is already connected.');
+  if (!r.rowCount) throw new HttpError(409, 'Your wallet is already saved.');
+  svc.notifyAdmins(`👛 ${svc.displayName(req.user)} saved a payout wallet. Open Admin panel > Users to review it if needed.`);
   res.json({ wallet_address: r.rows[0].wallet_address });
 }));
 
