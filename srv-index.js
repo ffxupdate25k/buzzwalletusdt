@@ -18,7 +18,7 @@ app.use('/telegram', require('./srv-route-webhook'));
 
 // Screenshot uploads are larger than normal JSON requests.
 const json = (req, res, next) => {
-  const big = req.method === 'POST' && /^\/tasks\/\d+\/submit$/.test(req.path);
+  const big = req.method === 'POST' && (/^\/tasks\/\d+\/submit$/.test(req.path) || req.path === '/wallet');
   return express.json({ limit: big ? '6mb' : '100kb' })(req, res, next);
 };
 app.use('/api/admin', json, require('./srv-route-admin'));
