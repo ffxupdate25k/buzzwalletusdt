@@ -72,16 +72,12 @@ router.put('/settings', wrap(async (req, res) => {
   if (newKey && (newKey.length < 8 || newKey.length > 300 || /\s/.test(newKey))) {
     throw new HttpError(400, 'That API key does not look right.');
   }
-  const wc_project_id = String(b.wc_project_id || '').trim();
-  if (wc_project_id && !/^[A-Za-z0-9]{16,64}$/.test(wc_project_id)) {
-    throw new HttpError(400, 'The WalletConnect project ID does not look right.');
-  }
   if (auto_payout && !(newKey || cur.payout_api_key)) throw new HttpError(400, 'Add the payout API key before turning on auto payout.');
   if (auto_payout && !payout_token_address) throw new HttpError(400, 'Add the token address before turning on auto payout.');
 
   const toSave = {
     referral_reward, min_withdraw, max_withdraw, welcome_text,
-    auto_payout: String(auto_payout), payout_api_url, payout_token_address, wc_project_id
+    auto_payout: String(auto_payout), payout_api_url, payout_token_address
   };
   if (newKey) toSave.payout_api_key = newKey; // leaving it empty keeps the saved key
   await saveSettings(toSave);
@@ -217,6 +213,7 @@ router.post('/withdrawals/:id/reject', wrap(async (req, res) => {
 // ---------- Users ----------
 const USER_SELECT = `
   SELECT u.id, u.first_name, u.last_name, u.username, u.balance, u.created_at, u.wallet_address,
+         (u.wallet_qr_image IS NOT NULL) AS has_wallet_qr,
          (SELECT COUNT(*) FROM referrals r WHERE r.referrer_id = u.id AND r.status = 'completed') AS referrals
     FROM users u`;
 
@@ -310,11 +307,23 @@ router.delete('/channels/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Lets a user connect a different wallet (support case).
+// Lets a user save a different wallet (support case).
 router.post('/users/:id/wallet/reset', wrap(async (req, res) => {
-  const r = await pool.query('UPDATE users SET wallet_address = NULL, wallet_connected_at = NULL WHERE id = $1', [req.params.id]);
+  const r = await pool.query(
+    `UPDATE users SET wallet_address = NULL, wallet_connected_at = NULL, wallet_qr_image = NULL, wallet_qr_mime = NULL WHERE id = $1`,
+    [req.params.id]
+  );
   if (!r.rowCount) throw new HttpError(404, 'User not found.');
   res.json({ ok: true });
+}));
+
+// The QR-code screenshot the user attached when saving their wallet.
+router.get('/users/:id/wallet/qr', wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT wallet_qr_image, wallet_qr_mime FROM users WHERE id = $1', [req.params.id]);
+  if (!rows.length || !rows[0].wallet_qr_image) throw new HttpError(404, 'No QR screenshot on file.');
+  res.set('Content-Type', rows[0].wallet_qr_mime);
+  res.set('Cache-Control', 'private, max-age=300');
+  res.send(rows[0].wallet_qr_image);
 }));
 
 // ---------- Broadcast ----------
